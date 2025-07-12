@@ -1,103 +1,286 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import { DndContext, DragEndEvent, DragOverEvent, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import KanbanBoard from './components/KanbanBoard';
+import { Bucket, Item } from './types/kanban';
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [buckets, setBuckets] = useState<Bucket[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [showLeftShadow, setShowLeftShadow] = useState(false);
+  const [showRightShadow, setShowRightShadow] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    })
+  );
+
+  // Load data from localStorage on component mount
+  useEffect(() => {
+    const savedBuckets = localStorage.getItem('kanban-buckets');
+    if (savedBuckets) {
+      setBuckets(JSON.parse(savedBuckets));
+    } else {
+      // Initialize with default buckets
+      const defaultBuckets: Bucket[] = [
+        { id: 'todo', name: 'TODO', items: [] },
+        { id: 'in-progress', name: 'In Progress', items: [] },
+        { id: 'blocked', name: 'Blocked', items: [] },
+        { id: 'done', name: 'Done', items: [] },
+      ];
+      setBuckets(defaultBuckets);
+      localStorage.setItem('kanban-buckets', JSON.stringify(defaultBuckets));
+    }
+  }, []);
+
+  // Save to localStorage whenever buckets change
+  useEffect(() => {
+    if (buckets.length > 0) {
+      localStorage.setItem('kanban-buckets', JSON.stringify(buckets));
+    }
+  }, [buckets]);
+
+  // Handle scroll shadows
+  useEffect(() => {
+    const handleScroll = () => {
+      if (scrollContainerRef.current) {
+        const { scrollLeft, scrollWidth, clientWidth } = scrollContainerRef.current;
+        setShowLeftShadow(scrollLeft > 0);
+        setShowRightShadow(scrollLeft < scrollWidth - clientWidth - 1);
+      }
+    };
+
+    const scrollContainer = scrollContainerRef.current;
+    if (scrollContainer) {
+      scrollContainer.addEventListener('scroll', handleScroll);
+      handleScroll(); // Check initial state
+      
+      return () => scrollContainer.removeEventListener('scroll', handleScroll);
+    }
+  }, [buckets]);
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveId(null);
+
+    if (!over) return;
+
+    const activeId = active.id as string;
+    const overId = over.id as string;
+
+    if (activeId === overId) return;
+
+    // Find the source and destination buckets
+    const sourceBucket = buckets.find(bucket => 
+      bucket.items.some((item: Item) => item.id === activeId)
+    );
+    const destinationBucket = buckets.find(bucket => bucket.id === overId) || 
+                           buckets.find(bucket => 
+                             bucket.items.some((item: Item) => item.id === overId)
+                           );
+
+    if (!sourceBucket || !destinationBucket) return;
+
+    // If dropping on a bucket (not an item)
+    if (destinationBucket && !destinationBucket.items.some((item: Item) => item.id === overId)) {
+      const sourceBucketIndex = buckets.findIndex(bucket => bucket.id === sourceBucket.id);
+      const destinationBucketIndex = buckets.findIndex(bucket => bucket.id === destinationBucket.id);
+      
+      const sourceItemIndex = sourceBucket.items.findIndex((item: Item) => item.id === activeId);
+      const item = sourceBucket.items[sourceItemIndex];
+
+      const newBuckets = [...buckets];
+      newBuckets[sourceBucketIndex].items = sourceBucket.items.filter((item: Item) => item.id !== activeId);
+      newBuckets[destinationBucketIndex].items = [...destinationBucket.items, item];
+      
+      setBuckets(newBuckets);
+      return;
+    }
+
+    // If dropping on an item within the same bucket
+    if (sourceBucket.id === destinationBucket.id) {
+      const bucketIndex = buckets.findIndex(bucket => bucket.id === sourceBucket.id);
+      const oldIndex = sourceBucket.items.findIndex((item: Item) => item.id === activeId);
+      const newIndex = destinationBucket.items.findIndex((item: Item) => item.id === overId);
+
+      const newBuckets = [...buckets];
+      newBuckets[bucketIndex].items = arrayMove(sourceBucket.items, oldIndex, newIndex);
+      setBuckets(newBuckets);
+      return;
+    }
+
+    // If dropping on an item in a different bucket
+    const sourceBucketIndex = buckets.findIndex(bucket => bucket.id === sourceBucket.id);
+    const destinationBucketIndex = buckets.findIndex(bucket => bucket.id === destinationBucket.id);
+    const sourceItemIndex = sourceBucket.items.findIndex((item: Item) => item.id === activeId);
+    const destinationItemIndex = destinationBucket.items.findIndex((item: Item) => item.id === overId);
+
+    const item = sourceBucket.items[sourceItemIndex];
+    const newBuckets = [...buckets];
+    
+    newBuckets[sourceBucketIndex].items = sourceBucket.items.filter((item: Item) => item.id !== activeId);
+    newBuckets[destinationBucketIndex].items = [
+      ...destinationBucket.items.slice(0, destinationItemIndex),
+      item,
+      ...destinationBucket.items.slice(destinationItemIndex)
+    ];
+
+    setBuckets(newBuckets);
+  };
+
+  const handleDragOver = (event: DragOverEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+
+    const activeId = active.id as string;
+    const overId = over.id as string;
+
+    if (activeId === overId) return;
+
+    const sourceBucket = buckets.find(bucket => 
+      bucket.items.some((item: Item) => item.id === activeId)
+    );
+    const destinationBucket = buckets.find(bucket => bucket.id === overId) || 
+                           buckets.find(bucket => 
+                             bucket.items.some((item: Item) => item.id === overId)
+                           );
+
+    if (!sourceBucket || !destinationBucket) return;
+
+    // If dropping on a bucket (not an item)
+    if (destinationBucket && !destinationBucket.items.some((item: Item) => item.id === overId)) {
+      const sourceBucketIndex = buckets.findIndex(bucket => bucket.id === sourceBucket.id);
+      const destinationBucketIndex = buckets.findIndex(bucket => bucket.id === destinationBucket.id);
+      
+      const sourceItemIndex = sourceBucket.items.findIndex((item: Item) => item.id === activeId);
+      const item = sourceBucket.items[sourceItemIndex];
+
+      const newBuckets = [...buckets];
+      newBuckets[sourceBucketIndex].items = sourceBucket.items.filter((item: Item) => item.id !== activeId);
+      newBuckets[destinationBucketIndex].items = [...destinationBucket.items, item];
+      
+      setBuckets(newBuckets);
+    }
+  };
+
+  const addBucket = () => {
+    const newBucket: Bucket = {
+      id: `bucket-${Date.now()}`,
+      name: 'New Bucket',
+      items: []
+    };
+    setBuckets([...buckets, newBucket]);
+  };
+
+  const updateBucketName = (bucketId: string, newName: string) => {
+    setBuckets(buckets.map(bucket => 
+      bucket.id === bucketId ? { ...bucket, name: newName } : bucket
+    ));
+  };
+
+  const addItem = (bucketId: string) => {
+    const newItem: Item = {
+      id: `item-${Date.now()}`,
+      title: 'New Item',
+      description: '',
+      createdAt: new Date().toISOString()
+    };
+    
+    setBuckets(buckets.map(bucket => 
+      bucket.id === bucketId 
+        ? { ...bucket, items: [...bucket.items, newItem] }
+        : bucket
+    ));
+  };
+
+  const updateItem = (bucketId: string, itemId: string, updates: Partial<Item>) => {
+    setBuckets(buckets.map(bucket => 
+      bucket.id === bucketId 
+        ? { 
+            ...bucket, 
+            items: bucket.items.map(item => 
+              item.id === itemId ? { ...item, ...updates } : item
+            )
+          }
+        : bucket
+    ));
+  };
+
+  const deleteItem = (bucketId: string, itemId: string) => {
+    setBuckets(buckets.map(bucket => 
+      bucket.id === bucketId 
+        ? { ...bucket, items: bucket.items.filter(item => item.id !== itemId) }
+        : bucket
+    ));
+  };
+
+  const deleteBucket = (bucketId: string) => {
+    setBuckets(buckets.filter(bucket => bucket.id !== bucketId));
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200 px-4 py-4">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex justify-between items-center">
+            <h1 className="text-3xl font-bold text-gray-900">Kanban Board</h1>
+            <button
+              onClick={addBucket}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+            >
+              Add Bucket
+            </button>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+      </div>
+      
+      <div className="relative h-[calc(70vh-80px)]">
+        {/* Left scroll shadow */}
+        {showLeftShadow && (
+          <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-gray-50 to-transparent z-10 pointer-events-none" />
+        )}
+        
+        {/* Right scroll shadow */}
+        {showRightShadow && (
+          <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-50 to-transparent z-10 pointer-events-none" />
+        )}
+        
+        <DndContext
+          sensors={sensors}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragOver={handleDragOver}
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+          <div 
+            ref={scrollContainerRef}
+            className="flex gap-4 px-4 py-4 overflow-x-auto scrollbar-hide h-full mx-16"
+            style={{ scrollBehavior: 'smooth' }}
+          >
+            {buckets.map(bucket => (
+              <KanbanBoard
+                key={bucket.id}
+                bucket={bucket}
+                onUpdateBucketName={updateBucketName}
+                onAddItem={addItem}
+                onUpdateItem={updateItem}
+                onDeleteItem={deleteItem}
+                onDeleteBucket={deleteBucket}
+                activeId={activeId}
+              />
+            ))}
+          </div>
+        </DndContext>
+      </div>
     </div>
   );
 }
