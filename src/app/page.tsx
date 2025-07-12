@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { DndContext, DragEndEvent, DragOverEvent, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { arrayMove } from '@dnd-kit/sortable';
 import KanbanBoard from './components/KanbanBoard';
 import { Bucket, Item } from './types/kanban';
 

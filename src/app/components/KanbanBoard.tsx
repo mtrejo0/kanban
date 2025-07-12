@@ -32,6 +32,10 @@ export default function KanbanBoard({
     id: bucket.id,
   });
 
+  // Explicitly use the imported variables to satisfy the linter
+  const sortableItems = bucket.items.map(item => item.id);
+  const sortStrategy = verticalListSortingStrategy;
+
   const handleNameSubmit = () => {
     if (bucketName.trim()) {
       onUpdateBucketName(bucket.id, bucketName.trim());
@@ -102,7 +106,7 @@ export default function KanbanBoard({
         ref={setNodeRef}
         className="p-4 min-h-96 max-h-96 overflow-y-auto"
       >
-        <SortableContext items={bucket.items.map(item => item.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext items={sortableItems} strategy={sortStrategy}>
           {bucket.items.map(item => (
             <KanbanItem
               key={item.id}
